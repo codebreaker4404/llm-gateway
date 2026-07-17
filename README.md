@@ -4,8 +4,7 @@ A small, production-style **API gateway that sits in front of the Claude API**. 
 
 Built as a focused example of the fundamentals a backend/AI engineer is expected to ship: typed code, request validation, dependency injection, auth, structured error handling, unit tests that mock the external LLM, containerization, and CI.
 
-<!-- Replace <user>/<repo> with your GitHub path to activate the badge -->
-![CI](https://github.com/<user>/llm-gateway/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/codebreaker4404/llm-gateway/actions/workflows/ci.yml/badge.svg)
 
 ---
 
