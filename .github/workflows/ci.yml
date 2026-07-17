@@ -1,44 +1,44 @@
-# Day 6 作业:GitHub Actions CI
-# 作用:每次 push / 开 PR 时,GitHub 自动帮你跑代码质量检查(ruff + mypy + pytest)。
-# 好处:代码有问题当场红灯,合并前就拦住;这是所有公司的标配,JD 高频词。
+# GitHub Actions CI
+# What it does: on every push / PR, GitHub automatically runs the code-quality checks (ruff + mypy + pytest).
+# Why: broken code fails immediately and is caught before merge; this is standard at every company.
 #
-# 放在固定路径 .github/workflows/ci.yml —— GitHub 会自动发现并执行。
+# Kept at the fixed path .github/workflows/ci.yml — GitHub discovers and runs it automatically.
 
-name: CI                          # 这个工作流的名字(显示在 GitHub Actions 页)
+name: CI                          # the name of this workflow (shown on the GitHub Actions page)
 
-on:                               # 什么时候触发
-  push:                           # 每次 push 代码
-  pull_request:                   # 每次开 / 更新 PR
+on:                               # when to trigger
+  push:                           # on every push
+  pull_request:                   # on every opened / updated PR
 
 jobs:
-  lint-and-test:                  # 一个 job,名字自取
-    runs-on: ubuntu-latest        # 在 GitHub 提供的 Linux 机器上跑
+  lint-and-test:                  # a job; name is arbitrary
+    runs-on: ubuntu-latest        # run on a GitHub-provided Linux machine
 
     steps:
-      # 1. 把你的代码拉到这台机器上
+      # 1. Check out your code onto the machine
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 装 uv(你本地用的那个包管理器)
+      # 2. Install uv (the package manager used locally)
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      # 3. 装 Python 3.12
+      # 3. Install Python 3.12
       - name: Set up Python
         run: uv python install 3.12
 
-      # 4. 按 pyproject.toml / uv.lock 装所有依赖(含 dev 依赖)
+      # 4. Install all dependencies per pyproject.toml / uv.lock (including dev deps)
       - name: Install dependencies
         run: uv sync --dev
 
-      # 5. ruff:代码风格 / 常见错误检查(比 mypy 快,先跑)
+      # 5. ruff: style / common-error checks (faster than mypy, so run it first)
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      # 6. mypy:严格类型检查
+      # 6. mypy: strict type checking
       - name: Type check (mypy)
         run: uv run mypy --strict main.py
 
-      # 7. pytest:跑测试(测试里 mock 掉了 Claude,所以 CI 里【不需要】真的 API key)
+      # 7. pytest: run the tests (they mock Claude, so CI needs no real API key)
       - name: Test (pytest)
         run: uv run pytest -v

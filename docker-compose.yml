@@ -1,22 +1,22 @@
-# Day 5 作业:docker compose 编排文件
-# 作用:用一个文件描述所有服务,一条命令全部启动。
-# 现在只有一个 api 服务,好处还不明显;但 Week 9/11 会加向量库、监控等,
-# 到时 docker compose up 一键拉起一整套环境——那才是它的威力。
+# docker compose orchestration file
+# What it does: describe all services in one file and start them with a single command.
+# With only one api service the benefit is modest; but as the stack grows (vector store,
+# monitoring, etc.), `docker compose up` brings the whole environment up at once — that's the point.
 #
-# 启动:  docker compose up --build     # 构建镜像并启动(前台,看得到日志)
-# 后台:  docker compose up -d --build   # 后台启动
-# 停止:  docker compose down            # 停止并清理
+# Start:       docker compose up --build     # build the image and start (foreground, logs visible)
+# Background:  docker compose up -d --build   # start detached
+# Stop:        docker compose down            # stop and clean up
 
 services:
-  api:                          # 服务名,自己取(以后加别的服务就并列往下写)
-    build: .                    # 用当前目录的 Dockerfile 构建镜像
+  api:                          # service name, arbitrary (add more services alongside later)
+    build: .                    # build the image from the Dockerfile in the current directory
     ports:
-      - "8000:8000"             # 端口映射,等价于 docker run 的 -p:你电脑8000 → 容器8000
+      - "8000:8000"             # port mapping, like docker run's -p: host 8000 -> container 8000
     environment:
-      # 网关自己的鉴权 key(下游用户调你时要出示)
+      # the gateway's own auth key (downstream callers must present it)
       - GATEWAY_API_KEY=my-secret
-      # 你的网关去调 Claude 用的 key —— 从你本机环境变量透传进去,不写死在文件里
+      # the key the gateway uses to call Claude — passed through from your host env, not hard-coded here
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # 如用 GLM/Z.ai 等 Anthropic 兼容端点,取消下一行注释
+      # if using an Anthropic-compatible endpoint (e.g. GLM/Z.ai), uncomment the next line
       # - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}
-    # restart: unless-stopped   # (可选)容器意外退出时自动重启,生产常用
+    # restart: unless-stopped   # (optional) auto-restart on unexpected exit, common in production
