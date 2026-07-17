@@ -1,29 +1,29 @@
-"""Day 6 周项目:llm-gateway —— Week 1 的整合收官作品。
+"""llm-gateway — a small, production-style API gateway in front of the Claude API.
 
-把整周学的东西拧成一个真实服务:
-  - 类型标注 + Pydantic 校验(Day1)
-  - async 端点 + await 调用外部 API(Day2)
-  - 可被 pytest + mock 测试(Day3,见 tests/test_main.py)
-  - FastAPI 路由 / 请求体 / 依赖注入 / HTTPException(Day4)
-  - 请求日志 middleware + lifespan(Day5)
-  - 调用 Claude API 返回结果(今天新学,最简调用)
+A focused example of the fundamentals a backend/AI engineer is expected to ship:
+  - Type hints + Pydantic validation
+  - async endpoint + await on an external API call
+  - Testable with pytest + mock (see tests/test_main.py)
+  - FastAPI routing / request body / dependency injection / HTTPException
+  - Request-logging middleware + lifespan
+  - Calls the Claude API and returns the result
 
-功能:POST /v1/complete 收一个 prompt → 调 Claude → 返回生成文本。
+What it does: POST /v1/complete takes a prompt -> calls Claude -> returns the generated text.
 
-运行(先装依赖):
+Run (install deps first):
     uv add fastapi "uvicorn[standard]" anthropic
     uv add --dev pytest pytest-asyncio ruff mypy
 
-    # 需要一个 API key(环境变量):
-    export ANTHROPIC_API_KEY=sk-...            # Claude 官方
-    # 或用 Z.ai/GLM 兼容端点(Anthropic 兼容,改 base_url + key 即可):
-    # export ANTHROPIC_BASE_URL=https://...    # SDK 会自动读这个环境变量
-    export GATEWAY_API_KEY=my-secret           # 本网关自己的鉴权 key
+    # Needs an API key (environment variable):
+    export ANTHROPIC_API_KEY=sk-...            # official Claude
+    # Or an Anthropic-compatible endpoint (just change base_url + key):
+    # export ANTHROPIC_BASE_URL=https://...    # the SDK reads this automatically
+    export GATEWAY_API_KEY=my-secret           # this gateway's own auth key
 
     uv run uvicorn main:app --reload
 
-测试:  http://127.0.0.1:8000/docs
-类型检查:uv run mypy --strict main.py
+Try it:      http://127.0.0.1:8000/docs
+Type check:  uv run mypy --strict main.py
 """
 
 import os
@@ -38,29 +38,30 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 # ============================================================
-# 配置(从环境变量读,不写死在代码里)
+# Config (read from environment variables, never hard-coded)
 # ============================================================
 
-DEFAULT_MODEL = "claude-opus-4-8"                 # 官方 API 参考推荐的默认模型
-# 本网关自己的鉴权 key(注意:这跟 Claude 的 ANTHROPIC_API_KEY 是两回事)
+DEFAULT_MODEL = "claude-opus-4-8"                 # default model recommended by the official API reference
+# This gateway's own auth key (note: this is NOT the same as Claude's ANTHROPIC_API_KEY)
 GATEWAY_API_KEY = os.environ.get("GATEWAY_API_KEY", "dev-secret")
 
 
 # ============================================================
-# lifespan:启动时建一个【共享的】Claude 客户端,全程复用(Day5)
+# lifespan: build a *shared* Claude client at startup, reuse it for the whole process
 # ============================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """启动时建 AsyncAnthropic 客户端一次,挂到 app.state 给所有请求复用。
+    """Build the AsyncAnthropic client once at startup and attach it to app.state for reuse.
 
-    为什么用 lifespan 建:建客户端有开销,不该每个请求都新建一个。
-    AsyncAnthropic() 会自动从环境变量读 ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL。
+    Why build it in lifespan: creating the client has overhead; we should not
+    rebuild it on every request. AsyncAnthropic() reads ANTHROPIC_API_KEY /
+    ANTHROPIC_BASE_URL from the environment automatically.
     """
-    print("[lifespan] 启动:创建共享 Claude 客户端")
-    app.state.llm = AsyncAnthropic()              # 共享资源:见 get_llm 依赖
+    print("[lifespan] startup: creating shared Claude client")
+    app.state.llm = AsyncAnthropic()              # shared resource: see the get_llm dependency
     yield
-    print("[lifespan] 关闭:清理客户端")
+    print("[lifespan] shutdown: cleaning up client")
     await app.state.llm.close()
 
 
@@ -68,7 +69,7 @@ app = FastAPI(title="llm-gateway", lifespan=lifespan)
 
 
 # ============================================================
-# middleware:请求日志(Day5)——每个请求打印方法/路径/耗时
+# middleware: request logging — print method/path/latency for every request
 # ============================================================
 
 @app.middleware("http")
@@ -81,68 +82,69 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
 
 
 # ============================================================
-# 依赖:鉴权 + 取共享客户端(Day4 的 Depends)
+# Dependencies: auth + fetch the shared client (FastAPI Depends)
 # ============================================================
 
 def verify_api_key(x_api_key: str = Header()) -> str:
-    """从请求头 X-API-Key 校验本网关的访问凭证。key 错 -> 401。"""
+    """Validate this gateway's access credential from the X-API-Key header. Wrong key -> 401."""
     if x_api_key != GATEWAY_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return x_api_key
 
 
 def get_llm(request: Request) -> AsyncAnthropic:
-    """把 lifespan 建好的共享客户端取出来。
+    """Return the shared client built in lifespan.
 
-    单独抽成依赖有个好处:测试时可以用 app.dependency_overrides 换成假客户端,
-    从而【不真的调 Claude】(见测试文件)——这就是 Day3 学的 mock 思想。
+    Extracting this as a dependency has a nice benefit: tests can swap it out
+    with app.dependency_overrides for a fake client, so they *never actually
+    call Claude* (see the test file) — this is the mocking idea in practice.
     """
-    # app.state 是无类型的(属性访问返回 Any),用 cast 明确告诉 mypy 它是什么。
+    # app.state is untyped (attribute access returns Any); use cast to tell mypy what it is.
     return cast(AsyncAnthropic, request.app.state.llm)
 
 
 # ============================================================
-# Pydantic 模型:请求体校验 + 响应结构(Day1 + Day4)
+# Pydantic models: request-body validation + response structure
 # ============================================================
 
 class CompleteRequest(BaseModel):
-    prompt: str = Field(min_length=1, max_length=10000, description="要发给模型的提示词")
-    max_tokens: int = Field(default=1024, gt=0, le=8192, description="最多生成多少 token")
-    model: str = Field(default=DEFAULT_MODEL, description="用哪个模型")
+    prompt: str = Field(min_length=1, max_length=10000, description="the prompt to send to the model")
+    max_tokens: int = Field(default=1024, gt=0, le=8192, description="max tokens to generate")
+    model: str = Field(default=DEFAULT_MODEL, description="which model to use")
 
 
 class CompleteResponse(BaseModel):
-    text: str                    # 模型生成的文本
-    model: str                   # 实际使用的模型
-    input_tokens: int            # 输入 token 数(计费用)
-    output_tokens: int           # 输出 token 数
+    text: str                    # the text generated by the model
+    model: str                   # the model actually used
+    input_tokens: int            # input token count (for billing)
+    output_tokens: int           # output token count
 
 
 # ============================================================
-# 端点:POST /v1/complete —— 收 prompt,调 Claude,返回结果
+# Endpoint: POST /v1/complete — take a prompt, call Claude, return the result
 # ============================================================
 
 @app.post("/v1/complete", response_model=CompleteResponse)
 async def complete(
-    req: CompleteRequest,                              # 请求体自动校验(Day1/Day4)
-    api_key: str = Depends(verify_api_key),            # 先过鉴权(Day4)
-    llm: AsyncAnthropic = Depends(get_llm),            # 注入共享客户端
+    req: CompleteRequest,                              # request body validated automatically
+    api_key: str = Depends(verify_api_key),            # auth first
+    llm: AsyncAnthropic = Depends(get_llm),            # inject the shared client
 ) -> CompleteResponse:
-    """async 端点:await 调用 Claude 期间,服务器可处理别的请求(Day2)。"""
+    """async endpoint: while awaiting Claude, the server can handle other requests."""
     try:
-        # 最简调用:给 model / max_tokens / messages 即可(官方 API 参考)
+        # Minimal call: model / max_tokens / messages is all you need (official API reference)
         message = await llm.messages.create(
             model=req.model,
             max_tokens=req.max_tokens,
             messages=[{"role": "user", "content": req.prompt}],
         )
-    except anthropic.APIStatusError as e:              # Claude 返回了错误状态码
-        # 把上游错误转成网关的 502(Bad Gateway):不是我们的错,是上游的
+    except anthropic.APIStatusError as e:              # Claude returned an error status code
+        # Translate the upstream error into a gateway 502 (Bad Gateway): not our fault, it's upstream
         raise HTTPException(status_code=502, detail=f"LLM error: {e.message}") from e
-    except anthropic.APIConnectionError as e:          # 连不上 Claude
+    except anthropic.APIConnectionError as e:          # could not reach Claude
         raise HTTPException(status_code=503, detail="LLM unavailable") from e
 
-    # 响应 content 是一个 block 列表,把其中的文本拼起来(用 getattr 对 mypy 友好)
+    # The response content is a list of blocks; join their text (getattr keeps mypy happy)
     text = "".join(getattr(b, "text", "") for b in message.content)
     return CompleteResponse(
         text=text,
@@ -154,5 +156,5 @@ async def complete(
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
-    """健康检查端点:CI / 部署时用来确认服务活着(无需鉴权)。"""
+    """Health-check endpoint: used by CI / deployment to confirm the service is alive (no auth)."""
     return {"status": "ok"}
